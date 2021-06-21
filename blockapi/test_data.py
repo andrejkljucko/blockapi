@@ -17,7 +17,8 @@ test_addresses = {
     ],
     'EOS': ['fzrv13xeykgc'],
     'ETH': [
-        '0xca8fa8f0b631ecdb18cda619c4fc9d197c8affca'
+        '0xca8fa8f0b631ecdb18cda619c4fc9d197c8affca',
+        '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'
     ],
     'LTC': [
         'M8T1B2Z97gVdvmfkQcAtYbEepune1tzGua'

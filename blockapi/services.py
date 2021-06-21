@@ -199,6 +199,13 @@ class BlockchainInterface(ABC):
         return [t for t in txs if t.get('confirmed') in [True, None]]
 
 
+class BlockchainBulkAPI(Service, BlockchainInterface, ABC):
+
+    def __init__(self, api_key=None):
+        Service.__init__(self, api_key)
+        BlockchainInterface.__init__(self)
+
+
 class BlockchainAPI(Service, BlockchainInterface, ABC):
     symbol = None
 
