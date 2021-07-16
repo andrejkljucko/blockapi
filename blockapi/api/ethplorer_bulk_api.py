@@ -1,27 +1,66 @@
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import List, Callable, Any, TypeVar
+
 from blockapi import APIError
-from blockapi.services import BlockchainBulkAPI
+from blockapi.services import Service
 from blockapi.utils.decimal import safe_decimal
 
+Address = str
+PoolId = str
+A = TypeVar("A")
 
-class EthplorerBulkAPI(BlockchainBulkAPI):
 
-    symbol = 'ETH'
+@dataclass
+class UpdateData:
+    timestamp: int
+    blockNumber: int
+    from_address: Address
+    to_address: Address
+    hash: str
+    value: Any
+    last_balance: Decimal
+
+
+@dataclass
+class TransactionData:
+    update_data: UpdateData
+    input: str
+    success: bool
+
+
+@dataclass
+class OperationData:
+    update_data: UpdateData
+    contract: str
+    type: str
+    priority: str
+
+
+class EthplorerBulkAPI(Service):
     base_url = 'https://api-mon.ethplorer.io/'
-    default_api_key = 'EK-m29M7-cNU8smQ-5shy5'
+    default_api_key = 'freekey'
     rate_limit = 0.1
-    coef = 1e-18
-    start_offset = None
-    max_items_per_page = None
-    page_offset_step = None
+    # coef = 1e-18
 
     supported_requests = {
         'create_pool': 'createPool',
-        'clear_pool': 'clearPoolAddresses',
-        'add_addresses': 'addPoolAddresses',
         'delete_pool': 'deletePool',
+        'add_addresses': 'addPoolAddresses',
+        'clear_pool': 'clearPoolAddresses',
         'remove_addresses': 'deletePoolAddresses',
+        'get_last_block': 'getLastBlock?apiKey={api_key}',
         'get_pool_addresses': 'getPoolAddresses/{pool_id}?apiKey={api_key}',
-        'get_last_transactions': 'getPoolLastTransactions/{pool_id}?apiKey={api_key}',
+
+        'get_last_transactions': 'getPoolLastTransactions/{pool_id}?apiKey={api_key}&'
+                                 'period={period}&'
+                                 'endTimestamp={end_timestamp}&'
+                                 'startTimestamp={start_timestamp}',
+
+        'get_last_operations':   'getPoolLastOperations/{pool_id}?apiKey={api_key}&'
+                                 'period={period}&'
+                                 'endTimestamp={end_timestamp}&'
+                                 'startTimestamp={start_timestamp}',
     }
 
     def __init__(self, api_key=None):
@@ -32,43 +71,8 @@ class EthplorerBulkAPI(BlockchainBulkAPI):
             'accept': 'application/json',
             'Content-Type': 'application/x-www-form-urlencoded',
         }
-        self.pools = []
 
-    def get_balance(self):
-        result = []
-        for pool_id in self.pools:
-            balances = self.get_balances(pool_id)
-            for balance_data in balances:
-                result.append({
-                    'symbol': 'ETH',
-                    'amount': safe_decimal(balance_data[1]),
-                    'address': balance_data[0],
-                })
-        return result
-
-    def get_balances(self, pool_id):
-        response = self.request(
-            'get_last_transactions',
-            headers={'accept': self._headers['accept']},
-            api_key=self.api_key,
-            pool_id=pool_id,
-        )
-        print(response)
-        if 'error' not in response:
-            return self._get_actual_balances(response) if response else []
-        else:
-            raise APIError(response['error'])
-
-    @staticmethod
-    def _get_actual_balances(updates):
-        result = []
-        for address in updates:
-            if len(updates[address]) != 0:
-                last_balance = updates[address][0]["balances"][address]
-                result.append((address, last_balance))
-        return result
-
-    def _build_body(self, addresses=None, pool_id=None):
+    def _build_post_body(self, addresses=None, pool_id=None):
         body = f'apiKey={self.api_key}'
         if addresses:
             body = f'{body}&addresses={",".join(addresses)}'
@@ -76,34 +80,35 @@ class EthplorerBulkAPI(BlockchainBulkAPI):
             body = f'{body}&poolId={pool_id}'
         return body
 
-    def create_pool(self, addresses=None):
-        response = self.request(
-            'create_pool',
-            body=self._build_body(addresses),
-            headers=self._headers,
-        )
+    @staticmethod
+    def _error_handler(response: dict, getter: Callable[[dict], A]):
         if 'error' not in response:
-            self.pools.append(response['poolId'])
-            return response['poolId']
+            return getter(response)
         else:
             raise APIError(response['error'])
 
-    def clear_pool(self, pool_id):
-        response = self.request(
-            'clear_pool',
-            body=self._build_body(pool_id=pool_id),
-            headers=self._headers,
-        )
-        if 'error' not in response:
-            self.pools = []
-            return True
-        else:
-            raise APIError(response['error'])
+    def create_pool(self, addresses: List[Address]) -> PoolId:
+        response = self.request('create_pool', body=self._build_post_body(addresses), headers=self._headers, )
+        return self._error_handler(response, lambda json: json['poolId'])
 
-    def get_pool_addresses(self, pool_id):
+    def delete_pool(self, pool_id: str) -> bool:
+        response = self.request('delete_pool', body=self._build_post_body(pool_id=pool_id), headers=self._headers, )
+        return self._error_handler(response, lambda _: True)
+
+    def add_addresses(self, pool_id: str, addresses: List[Address]) -> bool:
+        raise NotImplementedError()
+
+    def remove_addresses(self, pool_id: str, addresses: List[Address]) -> bool:
+        raise NotImplementedError()
+
+    def clear_pool(self, pool_id: str) -> bool:
+        response = self.request('clear_pool', body=self._build_post_body(pool_id=pool_id), headers=self._headers, )
+        return self._error_handler(response, lambda _: True)
+
+    def get_pool_addresses(self, pool_id: str) -> List[Address]:
         response = self.request(
             'get_pool_addresses',
-            headers={'accecpt': self._headers['accept']},
+            headers={'accept': self._headers['accept']},
             api_key=self.api_key,
             pool_id=pool_id,
         )
@@ -112,20 +117,73 @@ class EthplorerBulkAPI(BlockchainBulkAPI):
         else:
             raise APIError(response['error'])
 
-    def delete_pool(self, pool_id):
-        response = self.request(
-            'delete_pool',
-            body=self._build_body(pool_id=pool_id),
-            headers=self._headers,
+    @staticmethod
+    def _parse_update_data(updates_json: dict, address: str) -> UpdateData:
+        return UpdateData(
+            int(updates_json[address]['timestamp']),
+            int(updates_json[address]['blockNumber']),
+            updates_json[address]['from'],
+            updates_json[address]['to'],
+            updates_json[address]['hash'],
+            updates_json[address]['value'],
+            safe_decimal(updates_json[address][0]["balances"][address]),
         )
-        if 'error' not in response:
-            self.pools.remove(pool_id)
-            return True
-        else:
-            raise APIError(response['error'])
 
-    # def add_addresses(self, pool_id, addresses):
-    #     pass
+    def _transaction_parser(self, transactions_json: dict, address: str) -> TransactionData:
+        return TransactionData(
+            self._parse_update_data(transactions_json, address),
+            transactions_json[address]['input'],
+            transactions_json[address]['success'] == 'true',
+        )
 
-    # def remove_addresses(self, pool_id, addresses):
-    #     pass
+    def _operation_parser(self, operations_json: dict, address: str) -> OperationData:
+        return OperationData(
+            self._parse_update_data(operations_json, address),
+            operations_json[address]['contract'],
+            operations_json[address]['type'],
+            operations_json[address]['priority'],
+        )
+
+    @staticmethod
+    def _parse_updates(updates_json: dict, parser: Callable[[dict, str], A]) -> List[A]:
+        if not updates_json:
+            return []
+        result = []
+        for address in updates_json:
+            if len(updates_json[address]) != 0:
+                result.append(parser(updates_json, address))
+        return result
+
+    def get_last_transactions(
+            self, pool_id: str, period: int, end_timestamp: int, start_timestamp: int) -> List[TransactionData]:
+        response = self.request(
+            'get_last_transactions',
+            headers={'accept': self._headers['accept']},
+            api_key=self.api_key,
+            pool_id=pool_id,
+            period=period,
+            end_timestamp=end_timestamp,
+            start_timestamp=start_timestamp,
+        )
+        return self._error_handler(response, lambda json: self._parse_updates(json, self._transaction_parser))
+
+    def get_last_operations(
+            self, pool_id: str, period: int, end_timestamp: int, start_timestamp: int) -> List[OperationData]:
+        response = self.request(
+            'get_last_operations',
+            headers={'accept': self._headers['accept']},
+            api_key=self.api_key,
+            pool_id=pool_id,
+            period=period,
+            end_timestamp=end_timestamp,
+            start_timestamp=start_timestamp,
+        )
+        return self._error_handler(response, lambda json: self._parse_updates(json, self._operation_parser))
+
+    def get_last_block(self) -> int:
+        response = self.request(
+            'get_last_block',
+            headers={'accept': self._headers['accept']},
+            api_key=self.api_key,
+        )
+        return self._error_handler(response, lambda json: json['lastBlock'])
